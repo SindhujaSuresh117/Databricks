@@ -1,0 +1,153 @@
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+from pyspark.sql.window import Window
+
+rating = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/rating-1.csv")
+movie_cast = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/movie_cast-1.csv")
+movie_direction = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/movie_direction-1.csv")
+reviewer = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/reviewer-1.csv")
+movie = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/movie-1.csv")
+movie_genre = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/movie_genres-1.csv")
+genre = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/genre-1.csv")
+director = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/director-1.csv")
+actor = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/shared_uploads/sureshsindhuja001@gmail.com/actor-1.csv")
+
+#1. From the following table, write a SQL query to find all reviewers whose ratings contain a NULL value. Return reviewer name.
+display(rating)
+display(reviewer)
+rating_reviewer = reviewer.join(rating,reviewer['rev_id'] == rating['rev_id'],"inner")\
+                         .where(rating['rev_stars'].isNull())\
+                        .select(reviewer['rev_name'],reviewer['rev_id'])
+display(rating_reviewer)
+
+#where rating.rev_Stars is Null;
+
+#2. From the following table, write a SQL query to find out who was cast in the movie 'Annie Hall'. Return actor first name, last name and role
+movie_actor_moviecast = actor.join(movie_cast,actor['act_id'] == movie_cast['act_id'],"inner")\
+                             .join(movie,movie['mov_id'] == movie_cast['mov_id'],"inner")\
+                             .where(movie['mov_title'] == 'Annie Hall')\
+                             .select(actor['act_fname'],actor['act_lname'],movie_cast['role'])
+display(movie_actor_moviecast)
+
+#3. From the following table, write a SQL query to find the director who directed a movie that featured a role in 'Eyes Wide Shut'. Return director first name, last name and movie title.
+movie_director_moviedirection = movie.join(movie_direction,movie['mov_id'] == movie_direction['mov_id'],"inner")\
+                             .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                             .where(movie['mov_title'] == 'Eyes Wide Shut')\
+                             .select(director['dir_fname'],director['dir_lname'],movie['mov_title'])
+display(movie_director_moviedirection)
+
+#4. From the following table, write a SQL query to find out which actors have not appeared in any movies between 1990 and 2000 (Begin and end values are included.). Return actor first name, last name, movie title and release year.
+movie_moviecast__actor = actor.join(movie_cast,actor['act_id'] == movie_cast['act_id'],"inner")\
+                             .join(movie,movie['mov_id'] == movie_cast['mov_id'],"inner")\
+                             .where((movie['mov_year'].cast(IntegerType()) <= 1990) | (movie['mov_year'].cast(IntegerType()) >= 2000))\
+                             .select(actor['act_fname'],actor['act_lname'],movie['mov_title'],movie['mov_year'])
+display(movie_moviecast__actor)
+
+ #5. From the following tables, write a SQL query to find the movies released before 1st January 1989. Sort the result-set in descending order by date of release. Return movie title, release year, date of release, duration, and first and last name of the director.
+
+movie_moviedirection_director =  movie.join(movie_direction,movie['mov_id'] == movie_direction['mov_id'],"inner")\
+                             .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                             .select(movie['mov_title'],movie['mov_year'],movie['mov_dt_rel'],movie['mov_time'],director['dir_fname'],director['dir_lname'],movie['mov_dt_rel'],to_date(movie['mov_dt_rel'],'dd-MM-yyyy').alias('movie_date_release'))\
+                             .where(col('movie_date_release') < '1989-01-01')\
+                             .orderBy(col('movie_date_release').desc())
+                            
+display(movie_moviedirection_director)
+
+#6. From the following table, write a SQL query to calculate the average movie length and count the number of movies in each genre. Return genre title, average time and number of movies for each genre.
+
+movie_moviegenre = movie.join(movie_genre,movie['mov_id'] == movie_genre['mov_id'],"inner")\
+                        .join(genre,genre['gen_id']== movie_genre['gen_id'],"inner")\
+                        .groupBy('gen_title').agg(avg(movie['mov_time']).alias('movie_length'),
+                                                count(movie['mov_id']).alias('number_of_movies'))\
+                        .select('gen_title','movie_length','number_of_movies')
+display(movie_moviegenre)
+
+#7. From the following table, write a SQL query to find movies with the shortest duration. Return movie title, movie year, director first name, last name, actor first name, last name and role.
+movie_moviedirection_director =  movie.join(movie_direction,movie['mov_id'] == movie_direction['mov_id'],"inner")\
+                             .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                            .join(movie_cast,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                            .join(actor,actor['act_id'] == movie_cast['act_id'],"inner")
+#display(movie_moviedirection_director)
+window_duration =  Window.orderBy(col('mov_time').cast(IntegerType()))                           
+window_df = movie_moviedirection_director.withColumn("min_time",row_number().over(window_duration))\
+                                         .where(col('min_time') == 1)
+#display(window_df)
+movie_shortduration = window_df.select('mov_title','mov_year','dir_fname','dir_lname','act_fname','act_lname','role')
+display(movie_shortduration)
+
+#8. From the following table, write a SQL query to find the years in which a movie received a rating of 3 or 4. Sort the result in increasing order on movie year.
+movie_rating = movie.join(rating,movie['mov_id'] == rating['mov_id'],"inner")\
+                    .where((col("rev_stars") == 3) | (col("rev_stars") == 4))\
+                    .select('mov_year','rev_stars')
+display(movie_rating)
+
+#9.From the following table, write a SQL query to find those movies that have at least one rating and received the most stars. Sort the result-set on movie title. Return movie title and maximum review stars.
+movie_rating = movie.join(rating,movie['mov_id'] == rating['mov_id'],"inner")\
+                    .groupBy("mov_title").agg(max(col('rev_stars')).alias("max_stars"),min(col('num_o_ratings')).alias("one_rating"))\
+                    .where(col('max_stars').isNotNull())\
+                    .select("mov_title","max_stars")
+display(movie_rating)
+
+#10. From the following table, write a SQL query to find out which movies have received ratings. Return movie title, director first name, director last name and review stars.
+
+movie_rating = movie.join(rating,movie['mov_id'] == rating['mov_id'],"inner")\
+                     .join(movie_direction,movie['mov_id'] == movie_direction['mov_id'],"inner")\
+                    .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                    .select("mov_title","dir_fname","dir_lname","rev_stars","num_o_ratings")
+
+display(movie_rating)
+
+#11. From the following table, write a SQL query to find movies in which one or more actors have acted in more than one film. Return movie title, actor first and last name, and the role.
+
+movie_moviedirection_director =  movie.join(movie_cast,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                            .join(actor,actor['act_id'] == movie_cast['act_id'],"inner")\
+                            .groupBy(movie_cast["act_id"]).agg(count(movie_cast["act_id"]).alias("count_movies"))\
+                            .select('*').filter(col('count_movies') > 1)
+                            #.select("mov_title","act_fname","act_lname","role")
+display(movie_moviedirection_director)
+
+join_df = movie_moviedirection_director.alias("mov_dir").join(actor.alias("act"), col("mov_dir.act_id") == col("act.act_id"),"inner")\
+                                         .join(movie_cast.alias("mov_cast"),col("mov_cast.act_id") == col("act.act_id"),"inner")\
+                                        .join(movie.alias("mov"),col("mov_cast.mov_id") == col("mov.mov_id"),"inner")\
+                                        .select("mov_title","act_fname","act_lname","role")
+display(join_df)
+
+#solution -2
+window_df = Window.partitionBy(actor["act_id"])
+movie_moviedirection_director =  movie.join(movie_cast,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                            .join(actor,actor['act_id'] == movie_cast['act_id'],"inner")\
+                            .withColumn("count_movies",count(movie_cast["act_id"]).over(window_df))\
+                            .where(col("count_movies") > 1)\
+                            .select("mov_title","act_fname","act_lname","role","count_movies")
+                            
+display(movie_moviedirection_director)
+
+#12. From the following tables, write a SQL query to find the actor whose first name is 'Claire' and last name is 'Danes'. Return director first name, last name, movie title, actor first name and last name, role.
+
+movie_actor_director =  movie.join(movie_cast,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                                     .join(actor,actor['act_id'] == movie_cast['act_id'],"inner")\
+                                     .join(movie_direction,movie_direction['mov_id'] == movie['mov_id'],"inner")\
+                                     .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                                    .where((actor['act_fname'] == 'Claire')&(actor['act_lname'] == 'Danes'))\
+                                    .select("dir_fname","dir_lname","mov_title","act_fname","act_lname","role")
+                                     
+display(movie_actor_director)
+
+#solution-2
+movie_actor_director2 = actor.where((actor['act_fname'] == 'Claire')&(actor['act_lname'] == 'Danes'))\
+                            .join(movie_cast,actor['act_id'] == movie_cast['act_id'],"inner")\
+                            .join(movie_direction,movie_direction['mov_id'] == movie_cast['mov_id'],"inner")\
+                            .join(movie,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                            .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                            .select("dir_fname","dir_lname","mov_title","act_fname","act_lname","role")
+display(movie_actor_director2)
+
+#13. From the following table, write a SQL query to find for actors whose films have been directed by them. Return actor first name, last name, movie title and role.
+movie_actor_director =  movie.join(movie_cast,movie_cast['mov_id'] == movie['mov_id'],"inner")\
+                                     .join(actor,actor['act_id'] == movie_cast['act_id'],"inner")\
+                                     .join(movie_direction,movie_direction['mov_id'] == movie['mov_id'],"inner")\
+                                     .join(director,director['dir_id'] == movie_direction['dir_id'],"inner")\
+                                     .where((actor['act_fname']==director['dir_fname']))\
+                                     .select('act_fname','act_lname','mov_title','role')
+display(movie_actor_director)
+
